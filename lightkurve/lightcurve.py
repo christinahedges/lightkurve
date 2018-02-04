@@ -129,9 +129,9 @@ class LightCurve(object):
             A new ``LightCurve`` in which the data are folded and sorted by
             phase.
         """
-        fold_time = (((self.time - ((phase) * period)) / period) % 1)
-        #Fold at -0.5 to 0.5 instead of 0 to 1
-        fold_time[fold_time>0.5]-=1
+        fold_time = (((self.time - phase * period) / period) % 1)
+        # fold time domain from -.5 to .5
+        fold_time[fold_time > 0.5] -= 1
         sorted_args = np.argsort(fold_time)
         if self.flux_err is None:
             return LightCurve(fold_time[sorted_args], self.flux[sorted_args])
@@ -325,7 +325,7 @@ class LightCurve(object):
         ----------
         ax : matplotlib.axes._subplots.AxesSubplot
             A matplotlib axes object to plot into. If no axes is provided,
-            a new one be generated.
+            a new one will be generated.
         normalize : bool
             Normalize the lightcurve before plotting?
         xlabel : str
@@ -340,7 +340,7 @@ class LightCurve(object):
             Shade the region between 0 and flux
         grid: bool
             Add a grid to the plot
-        **kwargs : dict
+        kwargs : dict
             Dictionary of arguments to be passed to `matplotlib.pyplot.plot`.
 
         Returns
@@ -474,6 +474,9 @@ class KeplerLightCurve(LightCurve):
         self.cadenceno = cadenceno
         self.keplerid = keplerid
 
+    def __repr__(self):
+        return('KeplerLightCurve Object (ID: {})'.format(self.keplerid))
+
     def correct(self, method='sff', **kwargs):
         """Corrects a lightcurve for motion-dependent systematic errors.
 
@@ -532,6 +535,9 @@ class KeplerLightCurveFile(object):
         self.quality_bitmask = quality_bitmask
         self.quality_mask = self._quality_mask(quality_bitmask)
 
+    def __repr__(self):
+        return('KeplerLightCurveFile Object (ID: {})'.format(self.keplerid))
+
     @property
     def hdu(self):
         return self._hdu
@@ -562,7 +568,7 @@ class KeplerLightCurveFile(object):
                                     quarter=self.quarter,
                                     mission=self.mission,
                                     cadenceno=self.cadenceno,
-                                    keplerid=self.hdu[0].header['KEPLERID'])
+                                    keplerid=self.keplerid)
         else:
             raise KeyError("{} is not a valid flux type. Available types are: {}".
                            format(flux_type, self._flux_types))
@@ -610,6 +616,10 @@ class KeplerLightCurveFile(object):
     def channel(self):
         """Channel number"""
         return self.header(ext=0)['CHANNEL']
+
+    @property
+    def keplerid(self):
+        return self.header(ext=0)['KEPLERID']
 
     @property
     def quarter(self):
