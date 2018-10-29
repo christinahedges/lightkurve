@@ -7,7 +7,6 @@ from tqdm import tqdm
 import os
 import datetime
 import logging
-from collections import Sequence
 
 import oktopus
 import numpy as np
@@ -21,11 +20,12 @@ from astropy.table import Table
 from astropy.io import fits
 from astropy.time import Time
 
-from .utils import running_mean, bkjd_to_astropy_time
+
+from .utils import running_mean, bkjd_to_astropy_time, btjd_to_astropy_time
 from . import PACKAGEDIR
 
 __all__ = ['LightCurve', 'KeplerLightCurve', 'TessLightCurve',
-           'iterative_box_period_search']
+           'iterative_box_period_search', 'LightCurveCollection']
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,8 @@ class LightCurve(object):
         # `TimeFormat` class for BKJD.
         if self.time_format == 'bkjd':
             return bkjd_to_astropy_time(self.time)
+        elif self.time_format == 'btjd':  # TESS
+            return btjd_to_astropy_time(self.time)
         return Time(self.time, format=self.time_format, scale=self.time_scale)
 
     def properties(self):
@@ -744,80 +746,6 @@ class LightCurve(object):
         return hdu
 
 
-class CollectionError(Exception):
-    """Raised if there is a problem with a LightCurveCollection."""
-    pass
-
-class LightCurveCollection(Sequence):
-    """
-    Collects multiple LightCurve objects together with helpful functions.
-    """
-
-    def __init__(self, lcs):
-        self.lcs = np.asarray(lcs)
-
-    def __len__(self):
-        return len(self.lcs)
-
-    def _ids(self):
-        '''Finds the KeplerIDs of lightcurves in the collection.
-
-        If there are undefined IDs, or no IDs exist, returns None.
-        '''
-        if 'keplerid' in vars(self.lcs[0]):
-            ids = np.asarray([lc.keplerid for lc in self.lcs])
-            if np.asarray(ids == None).any():
-                log.warn('LightCurves in LightCurve collection have keplerids with None values.')
-                return None
-            if len(np.unique(ids)) != len(ids):
-                log.warn('LightCurves in LightCurve collection do not all have unique keplerids.')
-                return None
-            else:
-                return ids
-        else:
-            return None
-
-    def __getitem__(self, index):
-        '''Indexes the collection. If a string is passed, will attempt to index by the ID that
-        has the same string.
-        '''
-        if isinstance(index, int):
-            return self.lcs[index]
-        elif isinstance(index, str):
-            ids = self._ids()
-            if ids is None:
-                raise CollectionError('Cannot index a LightCurveCollection with {}.'.format(index))
-            loc = np.where(ids == index)[0]
-            if len(loc) == 0:
-                raise CollectionError('No LightCurve named {} in the collection.'.format(index))
-            return self.lcs[loc[0]]
-        else:
-            raise CollectionError('Cannot index a LightCurveCollection with {}.'.format(index))
-
-
-    def append(self, lc):
-        # This error check doesn't work.
-        if not isinstance(lc, LightCurve):
-            log.warning("You can only collect LightCurves")
-        self.lcs = np.append(self.lcs,lc)
-
-    def __repr__(self):
-        str = ''
-        for lc in self.lcs[:-1]:
-            str += '{}, '.format(lc.__repr__())
-        str += '{}.'.format(self.lcs[-1].__repr__())
-        return str
-
-    def plot(self):
-        '''Plot a collection of LightCurves
-        '''
-        raise NotImplementedError()
-
-    def pca(self):
-        '''Creates the Principle Components of a collection of LightCurves
-        '''
-        raise NotImplementedError('Should be able to run a PCA on a collection.')
-
 
 class FoldedLightCurve(LightCurve):
     """Defines a folded lightcurve with different plotting defaults."""
@@ -847,8 +775,16 @@ class KeplerLightCurve(LightCurve):
         Data flux for every time point
     flux_err : array-like
         Uncertainty on each flux data point
-    centroid_col, centroid_row : array-like, array-like
-        Centroid column and row coordinates as a function of time
+    time_format : str
+        String specifying how an instant of time is represented,
+        e.g. 'bkjd' or 'jd'.
+    time_scale : str
+        String which specifies how the time is measured,
+        e.g. tdb', 'tt', 'ut1', or 'utc'.
+    centroid_col : array-like
+        Centroid column coordinates as a function of time
+    centroid_row : array-like
+        Centroid row coordinates as a function of time
     quality : array-like
         Array indicating the quality of each data point
     quality_bitmask : int
@@ -870,7 +806,8 @@ class KeplerLightCurve(LightCurve):
                  centroid_col=None, centroid_row=None, quality=None, quality_bitmask=None,
                  channel=None, campaign=None, quarter=None, mission=None,
                  cadenceno=None, keplerid=None, ra=None, dec=None):
-        super(KeplerLightCurve, self).__init__(time=time, flux=flux, flux_err=flux_err, time_format=time_format, time_scale=time_scale)
+        super(KeplerLightCurve, self).__init__(time=time, flux=flux, flux_err=flux_err,
+                                               time_format=time_format, time_scale=time_scale)
         self.centroid_col = self._validate_array(centroid_col, name='centroid_col')
         self.centroid_row = self._validate_array(centroid_row, name='centroid_row')
         self.quality = self._validate_array(quality, name='quality')
@@ -1004,6 +941,12 @@ class TessLightCurve(LightCurve):
         Data flux for every time point
     flux_err : array-like
         Uncertainty on each flux data point
+    time_format : str
+        String specifying how an instant of time is represented,
+        e.g. 'bkjd' or 'jd'.
+    time_scale : str
+        String which specifies how the time is measured,
+        e.g. tdb', 'tt', 'ut1', or 'utc'.
     centroid_col, centroid_row : array-like, array-like
         Centroid column and row coordinates as a function of time
     quality : array-like
@@ -1015,22 +958,30 @@ class TessLightCurve(LightCurve):
     ticid : int
         Tess Input Catalog ID number
     """
-    def __init__(self, time, flux=None, flux_err=None, centroid_col=None,
-                 centroid_row=None, quality=None, quality_bitmask=None,
-                 cadenceno=None, ticid=None):
-        super(TessLightCurve, self).__init__(time, flux, flux_err)
+    def __init__(self, time, flux=None, flux_err=None, time_format=None, time_scale=None,
+                 centroid_col=None, centroid_row=None, quality=None, quality_bitmask=None,
+                 cadenceno=None, sector=None, camera=None, ccd=None,
+                 ticid=None, ra=None, dec=None):
+        super(TessLightCurve, self).__init__(time=time, flux=flux, flux_err=flux_err,
+                                             time_format=time_format, time_scale=time_scale)
         self.centroid_col = self._validate_array(centroid_col, name='centroid_col')
         self.centroid_row = self._validate_array(centroid_row, name='centroid_row')
         self.quality = self._validate_array(quality, name='quality')
         self.cadenceno = self._validate_array(cadenceno)
         self.quality_bitmask = quality_bitmask
         self.mission = "TESS"
+        self.sector = sector
+        self.camera = camera
+        self.ccd = ccd
         self.ticid = ticid
+        self.ra = ra
+        self.dec = dec
 
     def __getitem__(self, key):
         lc = super(TessLightCurve, self).__getitem__(key)
         # Compared to `LightCurve`, we need to slice a few additional arrays:
         lc.quality = self.quality[key]
+        lc.cadenceno = self.cadenceno[key]
         lc.centroid_col = self.centroid_col[key]
         lc.centroid_row = self.centroid_row[key]
         return lc
@@ -1161,3 +1112,107 @@ def iterative_box_period_search(lc, niters=2, min_period=0.5, max_period=30,
         snr_d.append(depth_star * np.sqrt(width_star))
 
     return log_posterior, trial_periods, trial_periods[np.argmax(log_posterior)]
+
+class LightCurveCollection(object):
+    """
+    Collects multiple LightCurve objects together with helpful functions.
+    """
+    def __init__(self, lcs):
+        try:
+            lightcurves = np.asarray(lcs)
+        except:
+            raise TypeError("Unable to parse input")
+        self.data = {}
+        
+        for lc in lightcurves:
+            if isinstance(lc, KeplerLightCurve) or isinstance(lc,LightCurve):
+                if lc.keplerid:
+                    if lc.keplerid in self.data:
+                        self.data[lc.keplerid].append(lc)
+                    else:
+                        self.data[lc.keplerid] = [lc]
+                else: #no keplerID
+                    self.data[None].append(lc)
+            else:
+                raise TypeError("Object is not a LightCurve instance")
+        self.data[None] = []
+
+    def __len__(self):
+        length = 0
+        for lc_array in self.data.values():
+            for lc in lc_array:
+                length += 1
+        return length
+
+    def _ids(self):
+        """
+        Returns the kepler_ids of all the lightcurves as a dict_keys obj.
+        """
+        return self.data.keys()
+
+    def __getitem__(self, kep_id):
+        """
+        Returns the lightcurve associated with the kepler_id. 
+        """
+        try: 
+            return self.data[kep_id]
+        except:
+            raise ValueError('No LightCurve for ' + kep_id)
+
+    def append(self, lc, **kwargs):
+        try:
+            if lc.keplerid in self.data: 
+                self.data[lc.keplerid].append(lc)
+            else:
+                self.data[lc.keplerid] = [lc]
+        except:
+            raise TypeError("Input is not a lightcurve")
+
+    def stitch(self, normalize=False):
+        new_lc = LightCurve(time=[],flux=[])
+        for lc_array in self.data.values():
+            for lc in lc_array:
+                if normalize:
+                    lc = lc.normalize()
+                new_lc.append(lc)
+                if new_lc.keplerid != lc.keplerid:
+                    log.warning("CAUTION: Stitching light curves with multiple IDs")
+        return new_lc
+
+    def __repr__(self):
+        result = ""
+        for lightcurve_array in self.data.values():
+            for lightcurve in lightcurve_array:
+                result += lightcurve.__repr__() + " "
+            result += "\n"
+        return result
+
+    def plot(self, ax=None, **kwargs):
+        """Plots a collection of light curve.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes._subplots.AxesSubplot
+            A matplotlib axes object to plot into. If no axes is provided,
+            a new one will be generated.
+        
+        kwargs : dict
+            Dictionary of arguments to be passed to `matplotlib.pyplot.plot`.
+
+        Returns
+        -------
+        ax : matplotlib.axes._subplots.AxesSubplot
+            The matplotlib axes object.
+        """
+        if ax is None:
+            _, ax = plt.subplots()
+        for lc_array in self.data.values():
+            for lightcurve in lc_array:
+                lightcurve.plot(ax=ax,label=lightcurve.keplerid)
+
+        return ax
+
+    def pca(self):
+        '''Creates the Principle Components of a collection of LightCurves
+        '''
+        raise NotImplementedError('Should be able to run a PCA on a collection.')
