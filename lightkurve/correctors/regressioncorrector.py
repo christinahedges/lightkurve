@@ -133,13 +133,11 @@ class RegressionCorrector(Corrector):
         X = self.X.values[cadence_mask]
 
         # Compute `X^T cov^-1 X + 1/prior_sigma^2`
-#        sigma_w_inv = np.dot(X.T, X / flux_err[:, None]**2)
-        sigma_w_inv = np.dot(X.T, X)
+        sigma_w_inv = np.dot(X.T, X / flux_err[:, None]**2)
         if prior_sigma is not None:
             sigma_w_inv += np.diag(1. / prior_sigma**2)
         # Compute `X^T cov^-1 y + prior_mu/prior_sigma^2`
-#        B = np.dot(X.T, self.lc.flux[cadence_mask] / flux_err**2)
-        B = np.dot(X.T, self.lc.flux[cadence_mask])
+        B = np.dot(X.T, self.lc.flux[cadence_mask] / flux_err**2)
         if prior_sigma is not None:
             B += (prior_mu / prior_sigma**2)
 
@@ -237,7 +235,7 @@ class RegressionCorrector(Corrector):
             # samples = np.asarray([np.dot(submatrix.values, np.random.multivariate_normal(submatrix_coefficients, submatrix_coefficients_err)) for idx in range(100)]).T
             # model_err = np.abs(np.percentile(samples, [16, 84], axis=1) - np.median(samples, axis=1)[:, None].T).mean(axis=0)
             model_flux = np.dot(submatrix.values, submatrix_coefficients)
-            lcs[submatrix.name] = LightCurve(self.lc.time, model_flux, label=submatrix.name)
+            lcs[submatrix.name] = LightCurve(self.lc.time, model_flux, np.zeros(len(model_flux)), label=submatrix.name)
         return lcs
 
     def _diagnostic_plot(self):
