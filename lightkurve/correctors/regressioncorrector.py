@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 
 class RegressionCorrector(Corrector):
-    """Remove noise using linear regression against a design matrix.
+    """Remove noise using linear regression against a `.DesignMatrix`.
 
     .. math::
 
@@ -71,9 +71,14 @@ class RegressionCorrector(Corrector):
         The light curve that needs to be corrected.
     """
     def __init__(self, lc):
-        # Validate user input
+        # We don't accept NaN in time or flux.
         if np.any([~np.isfinite(lc.time), ~np.isfinite(lc.flux)]):
             raise ValueError('Input light curve has NaNs in time or flux. '
+                             'Please remove NaNs before correction '
+                             '(e.g. using `lc = lc.remove_nans()`).')
+        # We don't accept NaN in flux_err, unless all values are NaN.
+        if np.any(~np.isfinite(lc.flux_err)) and not np.all(~np.isfinite(lc.flux_err)):
+            raise ValueError('Input light curve has NaNs in `flux_err`. '
                              'Please remove NaNs before correction '
                              '(e.g. using `lc = lc.remove_nans()`).')
         self.lc = lc
@@ -136,6 +141,7 @@ class RegressionCorrector(Corrector):
         sigma_w_inv = np.dot(X.T, X / flux_err[:, None]**2)
         if prior_sigma is not None:
             sigma_w_inv += np.diag(1. / prior_sigma**2)
+
         # Compute `X^T cov^-1 y + prior_mu/prior_sigma^2`
         B = np.dot(X.T, self.lc.flux[cadence_mask] / flux_err**2)
         if prior_sigma is not None:
@@ -262,8 +268,14 @@ class RegressionCorrector(Corrector):
         return axs
 
     def diagnose(self):
-        """Produce diagnostic plots to assess the effectiveness of the correction."""
-        self._diagnostic_plot()
+        """Returns diagnostic plots to assess the most recent call to `correct()`.
+
+        Returns
+        -------
+        ax : `~matplotlib.axes.Axes`
+            The matplotlib axes object.
+        """
+        return self._diagnostic_plot()
 
     def diagnose_priors(self):
         if not hasattr(self, 'corrected_lc'):
