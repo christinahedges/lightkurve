@@ -1,4 +1,4 @@
-"""Defines tools to retrieve Kepler data from the archive at MAST."""
+"""Defines tools to retrieve Kepler/K2/TESS data from the archive at MAST."""
 from __future__ import division
 import os
 import glob
@@ -63,6 +63,7 @@ REPR_COLUMNS_BASE = [
 
 
 class SearchError(Exception):
+    """A specific exception for Lightkurve searches"""
     pass
 
 
